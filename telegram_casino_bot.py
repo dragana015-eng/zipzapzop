@@ -13,8 +13,8 @@ ADMIN_ID = 8194376702  # Zameni sa svojim Telegram ID-om
 DATA_FILE = "data.json"
 
 # House edge konfiguracija
-HOUSE_EDGE = 0.1  # 7% house edge
-RIGGING_PROBABILITY = 0.37  # 25% šanse za rigging (za postizanje house edge-a)
+HOUSE_EDGE = 0.1  # 10% house edge
+RIGGING_PROBABILITY = 0.37  # 37% šanse za rigging
 
 # Logging setup
 logging.basicConfig(
@@ -32,14 +32,16 @@ class CasinoBot:
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # Proveri da li postoje svi potrebni ključevi i dodaj ih ako ne postoje
                 self._ensure_data_structure(data)
                 return data
         except FileNotFoundError:
-            # Kreiranje osnovnih podataka ako fajl ne postoji
+            logger.info("Data file not found, creating new one")
             return self._create_default_data()
         except json.JSONDecodeError:
             logger.error("JSON file is corrupted, creating new one")
+            return self._create_default_data()
+        except Exception as e:
+            logger.error(f"Error loading data: {e}")
             return self._create_default_data()
 
     def _create_default_data(self) -> Dict[str, Any]:
@@ -65,53 +67,60 @@ class CasinoBot:
 
     def _ensure_data_structure(self, data: Dict[str, Any]) -> None:
         """Osigurava da postoje svi potrebni ključevi u podatkovnoj strukturi"""
-        if "users" not in data:
-            data["users"] = {}
-        if "house_balance" not in data:
-            data["house_balance"] = 100000
-        if "cashout_requests" not in data:
-            data["cashout_requests"] = {}
-        if "game_history" not in data:
-            data["game_history"] = []
-        if "broadcast_history" not in data:
-            data["broadcast_history"] = []
-        if "work_cooldowns" not in data:
-            data["work_cooldowns"] = {}
-        if "promo_codes" not in data:
-            data["promo_codes"] = {}
-        if "promo_usage" not in data:
-            data["promo_usage"] = {}
-        if "stats" not in data:
-            data["stats"] = {
-                "blackjack": {"games": 0, "profit": 0},
-                "roulette": {"games": 0, "profit": 0},
-                "dice": {"games": 0, "profit": 0},
-                "coinflip": {"games": 0, "profit": 0}
-            }
+        try:
+            if "users" not in data:
+                data["users"] = {}
+            if "house_balance" not in data:
+                data["house_balance"] = 100000
+            if "cashout_requests" not in data:
+                data["cashout_requests"] = {}
+            if "game_history" not in data:
+                data["game_history"] = []
+            if "broadcast_history" not in data:
+                data["broadcast_history"] = []
+            if "work_cooldowns" not in data:
+                data["work_cooldowns"] = {}
+            if "promo_codes" not in data:
+                data["promo_codes"] = {}
+            if "promo_usage" not in data:
+                data["promo_usage"] = {}
+            if "stats" not in data:
+                data["stats"] = {
+                    "blackjack": {"games": 0, "profit": 0},
+                    "roulette": {"games": 0, "profit": 0},
+                    "dice": {"games": 0, "profit": 0},
+                    "coinflip": {"games": 0, "profit": 0}
+                }
 
-        # Proveri da postoje svi game stats
-        for game in ["blackjack", "roulette", "dice", "coinflip"]:
-            if game not in data["stats"]:
-                data["stats"][game] = {"games": 0, "profit": 0}
-            if "games" not in data["stats"][game]:
-                data["stats"][game]["games"] = 0
-            if "profit" not in data["stats"][game]:
-                data["stats"][game]["profit"] = 0
+            # Proveri da postoje svi game stats
+            for game in ["blackjack", "roulette", "dice", "coinflip"]:
+                if game not in data["stats"]:
+                    data["stats"][game] = {"games": 0, "profit": 0}
+                if "games" not in data["stats"][game]:
+                    data["stats"][game]["games"] = 0
+                if "profit" not in data["stats"][game]:
+                    data["stats"][game]["profit"] = 0
 
-        # Osiguraj da svaki korisnik ima potrebne podatke
-        for user_id, user_data in data["users"].items():
-            if "balance" not in user_data:
-                user_data["balance"] = 0
-            if "username" not in user_data:
-                user_data["username"] = ""
-            if "total_wagered" not in user_data:
-                user_data["total_wagered"] = 0
-            if "total_won" not in user_data:
-                user_data["total_won"] = 0
-            if "last_work" not in user_data:
-                user_data["last_work"] = None
-            if "used_promo_codes" not in user_data:
-                user_data["used_promo_codes"] = []
+            # Osiguraj da svaki korisnik ima potrebne podatke
+            for user_id, user_data in data["users"].items():
+                if not isinstance(user_data, dict):
+                    data["users"][user_id] = {"balance": 0, "username": "", "total_wagered": 0, "total_won": 0, "last_work": None, "used_promo_codes": []}
+                    continue
+                    
+                if "balance" not in user_data:
+                    user_data["balance"] = 0
+                if "username" not in user_data:
+                    user_data["username"] = ""
+                if "total_wagered" not in user_data:
+                    user_data["total_wagered"] = 0
+                if "total_won" not in user_data:
+                    user_data["total_won"] = 0
+                if "last_work" not in user_data:
+                    user_data["last_work"] = None
+                if "used_promo_codes" not in user_data:
+                    user_data["used_promo_codes"] = []
+        except Exception as e:
+            logger.error(f"Error ensuring data structure: {e}")
 
     def save_data(self, data: Dict[str, Any] = None) -> None:
         """Čuva podatke u JSON fajl"""
@@ -125,46 +134,61 @@ class CasinoBot:
 
     def get_user_balance(self, user_id: int) -> int:
         """Vraća balans korisnika"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            self.data["users"][user_id] = {
-                "balance": 0,  # Početni balans
-                "username": "",
-                "total_wagered": 0,
-                "total_won": 0,
-                "last_work": None,
-                "used_promo_codes": []
-            }
-            self.save_data()
-        return self.data["users"][user_id]["balance"]
+        try:
+            user_id = str(user_id)
+            if user_id not in self.data["users"]:
+                self.data["users"][user_id] = {
+                    "balance": 0,
+                    "username": "",
+                    "total_wagered": 0,
+                    "total_won": 0,
+                    "last_work": None,
+                    "used_promo_codes": []
+                }
+                self.save_data()
+            return int(self.data["users"][user_id].get("balance", 0))
+        except Exception as e:
+            logger.error(f"Error getting user balance: {e}")
+            return 0
 
     def update_balance(self, user_id: int, amount: int) -> int:
         """Ažurira balans korisnika"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            self.get_user_balance(int(user_id))  # Kreiranje korisnika
+        try:
+            user_id = str(user_id)
+            if user_id not in self.data["users"]:
+                self.get_user_balance(int(user_id))
 
-        self.data["users"][user_id]["balance"] += amount
-        new_balance = self.data["users"][user_id]["balance"]
+            current_balance = int(self.data["users"][user_id].get("balance", 0))
+            new_balance = current_balance + amount
+            self.data["users"][user_id]["balance"] = new_balance
 
-        # Ažuriranje house balance-a
-        self.data["house_balance"] -= amount
+            # Ažuriranje house balance-a
+            current_house = int(self.data.get("house_balance", 100000))
+            self.data["house_balance"] = current_house - amount
 
-        # Ažuriranje total_won ako je amount pozitivan
-        if amount > 0:
-            self.data["users"][user_id]["total_won"] += amount
+            # Ažuriranje total_won ako je amount pozitivan
+            if amount > 0:
+                current_won = int(self.data["users"][user_id].get("total_won", 0))
+                self.data["users"][user_id]["total_won"] = current_won + amount
 
-        self.save_data()
-        return new_balance
+            self.save_data()
+            return new_balance
+        except Exception as e:
+            logger.error(f"Error updating balance: {e}")
+            return self.get_user_balance(int(user_id))
 
     def update_wager(self, user_id: int, amount: int) -> None:
         """Ažurira ukupan iznos opklada"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            self.get_user_balance(int(user_id))
+        try:
+            user_id = str(user_id)
+            if user_id not in self.data["users"]:
+                self.get_user_balance(int(user_id))
 
-        self.data["users"][user_id]["total_wagered"] += amount
-        self.save_data()
+            current_wagered = int(self.data["users"][user_id].get("total_wagered", 0))
+            self.data["users"][user_id]["total_wagered"] = current_wagered + amount
+            self.save_data()
+        except Exception as e:
+            logger.error(f"Error updating wager: {e}")
 
     def update_stats(self, game: str, profit: int) -> None:
         """Ažurira statistike igre"""
@@ -172,8 +196,11 @@ class CasinoBot:
             self._ensure_data_structure(self.data)
 
             if game in self.data["stats"]:
-                self.data["stats"][game]["games"] += 1
-                self.data["stats"][game]["profit"] += profit
+                current_games = int(self.data["stats"][game].get("games", 0))
+                current_profit = int(self.data["stats"][game].get("profit", 0))
+                
+                self.data["stats"][game]["games"] = current_games + 1
+                self.data["stats"][game]["profit"] = current_profit + profit
                 self.save_data()
         except Exception as e:
             logger.error(f"Error updating stats: {e}")
@@ -181,6 +208,9 @@ class CasinoBot:
     def log_game_result(self, user_id: int, game: str, bet: int, result: str, payout: int, rigged: bool = False) -> None:
         """Loguje rezultat igre"""
         try:
+            if "game_history" not in self.data:
+                self.data["game_history"] = []
+                
             self.data["game_history"].append({
                 "timestamp": datetime.now().isoformat(),
                 "user_id": user_id,
@@ -201,41 +231,55 @@ class CasinoBot:
 
     def can_work(self, user_id: int) -> tuple[bool, Optional[datetime]]:
         """Proverava da li korisnik može da radi"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            return True, None
-
-        last_work = self.data["users"][user_id].get("last_work")
-        if not last_work:
-            return True, None
-
         try:
-            last_work_time = datetime.fromisoformat(last_work)
-            next_work_time = last_work_time + timedelta(days=3)
-
-            if datetime.now() >= next_work_time:
+            user_id = str(user_id)
+            if user_id not in self.data["users"]:
                 return True, None
-            else:
-                return False, next_work_time
-        except:
+
+            last_work = self.data["users"][user_id].get("last_work")
+            if not last_work:
+                return True, None
+
+            try:
+                last_work_time = datetime.fromisoformat(last_work)
+                next_work_time = last_work_time + timedelta(days=3)
+
+                if datetime.now() >= next_work_time:
+                    return True, None
+                else:
+                    return False, next_work_time
+            except:
+                return True, None
+        except Exception as e:
+            logger.error(f"Error checking work availability: {e}")
             return True, None
 
     def set_work_time(self, user_id: int) -> None:
         """Postavlja vreme poslednjeg rada"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            self.get_user_balance(int(user_id))
+        try:
+            user_id = str(user_id)
+            if user_id not in self.data["users"]:
+                self.get_user_balance(int(user_id))
 
-        self.data["users"][user_id]["last_work"] = datetime.now().isoformat()
-        self.save_data()
+            self.data["users"][user_id]["last_work"] = datetime.now().isoformat()
+            self.save_data()
+        except Exception as e:
+            logger.error(f"Error setting work time: {e}")
 
     def get_all_users(self) -> List[int]:
         """Vraća listu svih user ID-ova"""
-        return [int(user_id) for user_id in self.data["users"].keys()]
+        try:
+            return [int(user_id) for user_id in self.data.get("users", {}).keys()]
+        except Exception as e:
+            logger.error(f"Error getting all users: {e}")
+            return []
 
     def is_rigged_game(self) -> bool:
         """Određuje da li je igra rigged na osnovu house edge-a"""
-        return random.random() < RIGGING_PROBABILITY
+        try:
+            return random.random() < RIGGING_PROBABILITY
+        except:
+            return False
 
     # PROMO CODE SISTEM
     def create_promo_code(self, code: str, amount: int, max_uses: int, expires_at: Optional[datetime] = None) -> bool:
@@ -243,8 +287,13 @@ class CasinoBot:
         try:
             code = code.upper()
             
+            if "promo_codes" not in self.data:
+                self.data["promo_codes"] = {}
+            if "promo_usage" not in self.data:
+                self.data["promo_usage"] = {}
+            
             if code in self.data["promo_codes"]:
-                return False  # Kod već postoji
+                return False
             
             self.data["promo_codes"][code] = {
                 "amount": amount,
@@ -263,57 +312,46 @@ class CasinoBot:
             return False
 
     def use_promo_code(self, user_id: int, code: str) -> tuple[bool, str, int]:
-        """
-        Pokušava da iskoristi promo kod
-        Vraća: (success, message, amount)
-        """
+        """Pokušava da iskoristi promo kod"""
         try:
             user_id = str(user_id)
             code = code.upper()
             
-            # Proveri da li korisnik postoji
             if user_id not in self.data["users"]:
                 self.get_user_balance(int(user_id))
             
-            # Proveri da li kod postoji
-            if code not in self.data["promo_codes"]:
+            if "promo_codes" not in self.data or code not in self.data["promo_codes"]:
                 return False, "❌ Promo kod ne postoji!", 0
             
             promo_data = self.data["promo_codes"][code]
             
-            # Proveri da li je kod aktivan
             if not promo_data.get("active", True):
                 return False, "❌ Promo kod je deaktiviran!", 0
             
-            # Proveri da li je kod istekao
             if promo_data.get("expires_at"):
                 expiry_date = datetime.fromisoformat(promo_data["expires_at"])
                 if datetime.now() > expiry_date:
                     return False, "❌ Promo kod je istekao!", 0
             
-            # Proveri da li je kod dostigao maksimalan broj korišćenja
             if promo_data["current_uses"] >= promo_data["max_uses"]:
                 return False, "❌ Promo kod je dostigao maksimalan broj korišćenja!", 0
             
-            # Proveri da li je korisnik već koristio ovaj kod
-            if code in self.data["users"][user_id].get("used_promo_codes", []):
+            user_promo_codes = self.data["users"][user_id].get("used_promo_codes", [])
+            if code in user_promo_codes:
                 return False, "❌ Već ste iskoristili ovaj promo kod!", 0
             
-            # Iskoristi kod
             amount = promo_data["amount"]
             
-            # Ažuriraj balans korisnika
             self.update_balance(int(user_id), amount)
             
-            # Dodaj kod u listu korišćenih kodova korisnika
             if "used_promo_codes" not in self.data["users"][user_id]:
                 self.data["users"][user_id]["used_promo_codes"] = []
             self.data["users"][user_id]["used_promo_codes"].append(code)
             
-            # Ažuriraj statistike koda
             self.data["promo_codes"][code]["current_uses"] += 1
             
-            # Dodaj u usage log
+            if "promo_usage" not in self.data:
+                self.data["promo_usage"] = {}
             if code not in self.data["promo_usage"]:
                 self.data["promo_usage"][code] = []
             
@@ -333,45 +371,140 @@ class CasinoBot:
 
     def get_promo_code_info(self, code: str) -> Optional[Dict[str, Any]]:
         """Vraća informacije o promo kodu"""
-        code = code.upper()
-        if code not in self.data["promo_codes"]:
+        try:
+            code = code.upper()
+            if "promo_codes" not in self.data or code not in self.data["promo_codes"]:
+                return None
+            
+            promo_data = self.data["promo_codes"][code].copy()
+            promo_data["usage_log"] = self.data.get("promo_usage", {}).get(code, [])
+            return promo_data
+        except Exception as e:
+            logger.error(f"Error getting promo code info: {e}")
             return None
-        
-        promo_data = self.data["promo_codes"][code].copy()
-        promo_data["usage_log"] = self.data["promo_usage"].get(code, [])
-        return promo_data
 
     def get_all_promo_codes(self) -> Dict[str, Any]:
         """Vraća sve promo kodove"""
-        return self.data["promo_codes"].copy()
-
-    def deactivate_promo_code(self, code: str) -> bool:
-        """Deaktivira promo kod"""
-        code = code.upper()
-        if code not in self.data["promo_codes"]:
-            return False
-        
-        self.data["promo_codes"][code]["active"] = False
-        self.save_data()
-        return True
-
-    def delete_promo_code(self, code: str) -> bool:
-        """Briše promo kod"""
-        code = code.upper()
-        if code not in self.data["promo_codes"]:
-            return False
-        
-        del self.data["promo_codes"][code]
-        if code in self.data["promo_usage"]:
-            del self.data["promo_usage"][code]
-        
-        self.save_data()
-        return True
+        try:
+            return self.data.get("promo_codes", {}).copy()
+        except Exception as e:
+            logger.error(f"Error getting all promo codes: {e}")
+            return {}
 
 # Kreiranje instance bota
 casino = CasinoBot()
 
-# PROMO CODE KOMANDE
+# KOMANDE
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start komanda sa pozdravom i prikazom balansa"""
+    try:
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "Nepoznat"
+
+        # Čuvanje username-a
+        user_id_str = str(user_id)
+        if user_id_str not in casino.data["users"]:
+            casino.data["users"][user_id_str] = {}
+        casino.data["users"][user_id_str]["username"] = username
+        casino.save_data()
+
+        balance = casino.get_user_balance(user_id)
+
+        welcome_text = f"""
+🎰 **Dobrodošli u Casino Bot!** 🎰
+
+Pozdrav {username}!
+💰 Vaš trenutni balans: **{balance:,} RSD**
+
+**Dostupne igre:**
+🃏 /play <ulog> - Blackjack
+🎲 /roulette <ulog> - Rulet
+🎲 /dice <ulog> <brojevi> - Dice (1-3 broja)
+🪙 /flip <ulog> <heads/tails> - Coinflip
+
+**Ostale komande:**
+💳 /bal - Proveri balans
+💼 /work - Radi za 30 RSD (svaka 3 dana)
+🎫 /promo <kod> - Iskoristi promo kod
+💸 /cashout <iznos> - Zatraži isplatu
+❓ /help - Pomoć
+        """
+
+        await update.message.reply_text(welcome_text, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error in start_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
+
+async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prikazuje balans korisnika"""
+    try:
+        user_id = update.effective_user.id
+        balance = casino.get_user_balance(user_id)
+
+        user_id_str = str(user_id)
+        if user_id_str in casino.data.get("users", {}):
+            user_data = casino.data["users"][user_id_str]
+            total_wagered = int(user_data.get("total_wagered", 0))
+            total_won = int(user_data.get("total_won", 0))
+            used_promo_codes = len(user_data.get("used_promo_codes", []))
+        else:
+            total_wagered = 0
+            total_won = 0
+            used_promo_codes = 0
+
+        await update.message.reply_text(
+            f"💰 **Vaš balans:** {balance:,} RSD\n\n"
+            f"📊 **Statistike:**\n"
+            f"🎲 Ukupno uloženo: {total_wagered:,} RSD\n"
+            f"🏆 Ukupno dobijeno: {total_won:,} RSD\n"
+            f"📈 Neto: {total_won - total_wagered:+,} RSD\n"
+            f"🎫 Iskorišćeni promo kodovi: {used_promo_codes}", 
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in balance_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
+
+async def work_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Work komanda - daje 30 RSD svakih 3 dana"""
+    try:
+        user_id = update.effective_user.id
+        username = update.effective_user.username or f"User_{user_id}"
+
+        can_work, next_work_time = casino.can_work(user_id)
+
+        if not can_work and next_work_time:
+            time_left = next_work_time - datetime.now()
+            days = time_left.days
+            hours, remainder = divmod(time_left.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            await update.message.reply_text(
+                f"⏰ **Već ste radili!**\n\n"
+                f"Možete ponovo raditi za:\n"
+                f"📅 {days} dana, {hours} sati i {minutes} minuta\n\n"
+                f"💼 Povratak rada: {next_work_time.strftime('%d.%m.%Y %H:%M')}",
+                parse_mode='Markdown'
+            )
+            return
+
+        work_amount = 30
+        old_balance = casino.get_user_balance(user_id)
+        new_balance = casino.update_balance(user_id, work_amount)
+        casino.set_work_time(user_id)
+
+        await update.message.reply_text(
+            f"💼 **Radni dan završen!**\n\n"
+            f"👤 Radnik: {username}\n"
+            f"💰 Zaradili ste: +{work_amount} RSD\n"
+            f"💳 Novi balans: {new_balance:,} RSD\n\n"
+            f"⏰ Sledeći rad za 3 dana!",
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        logger.error(f"Error in work_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
 
 async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Komanda za korišćenje promo koda"""
@@ -380,9 +513,11 @@ async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         username = update.effective_user.username or f"User_{user_id}"
         
         # Ažuriraj username
-        if str(user_id) not in casino.data["users"]:
-            casino.data["users"][str(user_id)] = {}
-        casino.data["users"][str(user_id)]["username"] = username
+        user_id_str = str(user_id)
+        if user_id_str not in casino.data["users"]:
+            casino.data["users"][user_id_str] = {}
+        casino.data["users"][user_id_str]["username"] = username
+        casino.save_data()
 
         if not context.args:
             await update.message.reply_text(
@@ -411,6 +546,146 @@ async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             
     except Exception as e:
         logger.error(f"Error in promo_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Help komanda sa svim dostupnim komandama"""
+    try:
+        user_id = update.effective_user.id
+
+        help_text = f"""
+🎰 **CASINO BOT - KOMANDE** 🎰
+
+**🎮 Igre (House Edge: 10%):**
+🃏 /play <ulog> - Blackjack
+🎰 /roulette <ulog> - Rulet (zatim izaberi opciju)
+🎲 /dice <ulog> <brojevi> - Dice (1-3 broja od 1-6)
+🪙 /flip <ulog> <heads/tails> - Coinflip
+
+**💰 Balans:**
+💳 /bal - Proveri balans i statistike
+💼 /work - Radi za 30 RSD (svaka 3 dana)
+🎫 /promo <kod> - Iskoristi promo kod
+💸 /cashout <iznos> - Zatraži isplatu (min. 1,000 RSD)
+
+**ℹ️ Ostalo:**
+🏠 /start - Početna poruka
+❓ /help - Ova poruka
+
+**📏 Minimalni ulog:** 10 RSD na sve igre
+        """
+
+        if user_id == ADMIN_ID:
+            help_text += """
+
+**🔧 Admin komande:**
+➕ /add <user_id> <iznos> - Dodaj balans
+➖ /remove <user_id> <iznos> - Oduzmi balans  
+🏦 /house - House balans i detaljne statistike
+💸 /cashouts - Upravljanje cashout zahtevima
+📡 /broadcast <poruka> - Pošalji poruku svim korisnicima
+
+**🎫 Promo kod komande:**
+🎁 /create_promo <kod> <iznos> <max_korišćenja> [dani] - Kreiraj promo kod
+📊 /promo_stats - Upravljanje promo kodovima
+            """
+
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error in help_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
+
+# ADMIN KOMANDE
+async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin komanda za dodavanje balansa"""
+    try:
+        if update.effective_user.id != ADMIN_ID:
+            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
+            return
+
+        if len(context.args) != 2:
+            await update.message.reply_text("❌ Korišćenje: /add <user_id> <iznos>")
+            return
+
+        try:
+            target_user_id = int(context.args[0])
+            amount = int(context.args[1])
+        except ValueError:
+            await update.message.reply_text("❌ User ID i iznos moraju biti brojevi!")
+            return
+
+        old_balance = casino.get_user_balance(target_user_id)
+        new_balance = casino.update_balance(target_user_id, amount)
+
+        await update.message.reply_text(
+            f"✅ **Balans je ažuriran!**\n\n"
+            f"👤 Korisnik: {target_user_id}\n"
+            f"💰 Stari balans: {old_balance:,} RSD\n"
+            f"➕ Dodano: {amount:+,} RSD\n"
+            f"💳 Novi balans: {new_balance:,} RSD",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in add_balance_command: {e}")
+        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
+
+async def house_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin komanda za prikaz house balansa i statistika"""
+    try:
+        if update.effective_user.id != ADMIN_ID:
+            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
+            return
+
+        house_balance = casino.data.get("house_balance", 0)
+        total_users = len(casino.data.get("users", {}))
+        
+        total_user_balance = 0
+        for user in casino.data.get("users", {}).values():
+            if isinstance(user, dict):
+                total_user_balance += int(user.get("balance", 0))
+
+        stats = casino.data.get("stats", {})
+        total_games = sum(int(game_stat.get("games", 0)) for game_stat in stats.values())
+        total_house_profit = sum(int(game_stat.get("profit", 0)) for game_stat in stats.values())
+
+        promo_codes = casino.data.get("promo_codes", {})
+        total_promo_given = sum(int(code_data.get("amount", 0)) * int(code_data.get("current_uses", 0)) 
+                               for code_data in promo_codes.values())
+        active_promo_codes = sum(1 for p in promo_codes.values() if p.get("active", True))
+
+        recent_games = casino.data.get("game_history", [])[-50:]
+        rigged_count = sum(1 for game in recent_games if game.get("rigged", False))
+
+        total_wagered = sum(int(user.get("total_wagered", 0)) for user in casino.data.get("users", {}).values() if isinstance(user, dict))
+        actual_house_edge = (total_house_profit / total_wagered * 100) if total_wagered > 0 else 0
+
+        stats_text = "\n".join([
+            f"🎲 {game.title()}: {data.get('games', 0)} igara, {data.get('profit', 0):+,} RSD"
+            for game, data in stats.items()
+        ])
+
+        await update.message.reply_text(
+            f"🏦 **HOUSE STATUS**\n\n"
+            f"💰 House Balance: {house_balance:,} RSD\n"
+            f"👥 Ukupno korisnika: {total_users}\n"
+            f"💳 Balans korisnika: {total_user_balance:,} RSD\n\n"
+            f"📊 **Statistike igara:**\n"
+            f"{stats_text}\n\n"
+            f"🎫 **Promo kodovi:**\n"
+            f"📦 Ukupno: {len(promo_codes)}\n"
+            f"✅ Aktivni: {active_promo_codes}\n"
+            f"💸 Ukupno dodeljeno: {total_promo_given:,} RSD\n\n"
+            f"🎯 **House Edge:**\n"
+            f"📈 Cilj: 10.00%\n"
+            f"📊 Stvarni: {actual_house_edge:.2f}%\n"
+            f"💸 Ukupan profit: {total_house_profit:,} RSD\n\n"
+            f"🎰 **Rigging statistike:**\n"
+            f"⚙️ Poslednje 50 igara: {rigged_count}/50 rigged\n"
+            f"📋 Ukupno igara: {total_games}",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in house_balance_command: {e}")
         await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
 
 async def create_promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -455,7 +730,6 @@ async def create_promo_command(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("❌ Iznos, broj korišćenja i dani moraju biti brojevi!")
             return
 
-        # Kreiranje promo koda
         success = casino.create_promo_code(code, amount, max_uses, expires_at)
         
         if success:
@@ -477,473 +751,7 @@ async def create_promo_command(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Error in create_promo_command: {e}")
         await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
 
-async def promo_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za pregled statistika promo kodova"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        promo_codes = casino.get_all_promo_codes()
-        
-        if not promo_codes:
-            await update.message.reply_text("📭 Nema kreiranih promo kodova.")
-            return
-
-        # Kreiranje dugmića za svaki promo kod
-        keyboard = []
-        for code in list(promo_codes.keys())[:20]:  # Maksimalno 20 kodova
-            promo_data = promo_codes[code]
-            status = "✅" if promo_data.get("active", True) else "❌"
-            uses_text = f"{promo_data['current_uses']}/{promo_data['max_uses']}"
-            button_text = f"{status} {code} ({uses_text})"
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"promo_info_{code}")
-            ])
-
-        # Dodaj admin opcije
-        keyboard.append([
-            InlineKeyboardButton("🗑️ Upravljanje", callback_data="promo_manage"),
-            InlineKeyboardButton("📊 Ukupne statistike", callback_data="promo_total_stats")
-        ])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            "🎫 **PROMO KODOVI**\n\n"
-            "Kliknite na kod za detaljne informacije:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in promo_stats_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# PROMO CALLBACK HANDLERS
-
-async def promo_info_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Prikazuje detaljne informacije o promo kodu"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        code = query.data.replace("promo_info_", "")
-        promo_info = casino.get_promo_code_info(code)
-        
-        if not promo_info:
-            await query.edit_message_text("❌ Promo kod nije pronađen!")
-            return
-
-        # Format datuma
-        created_at = datetime.fromisoformat(promo_info["created_at"]).strftime("%d.%m.%Y %H:%M")
-        expires_text = "Ne ističe"
-        if promo_info["expires_at"]:
-            expires_at = datetime.fromisoformat(promo_info["expires_at"])
-            expires_text = expires_at.strftime("%d.%m.%Y %H:%M")
-            if datetime.now() > expires_at:
-                expires_text += " ⚠️ (istekao)"
-
-        status_text = "✅ Aktivan" if promo_info.get("active", True) else "❌ Deaktiviran"
-        
-        # Poslednji korisnici
-        recent_users = promo_info["usage_log"][-5:] if promo_info["usage_log"] else []
-        users_text = ""
-        if recent_users:
-            users_text = "\n\n**Poslednji korisnici:**\n"
-            for usage in recent_users:
-                username = usage.get("username", f"User_{usage['user_id']}")
-                timestamp = datetime.fromisoformat(usage["timestamp"]).strftime("%d.%m %H:%M")
-                users_text += f"• @{username} ({timestamp})\n"
-
-        info_text = f"""
-🎫 **PROMO KOD: {code}**
-
-💰 **Iznos:** {promo_info['amount']:,} RSD
-🔢 **Korišćenja:** {promo_info['current_uses']}/{promo_info['max_uses']}
-📊 **Status:** {status_text}
-📅 **Kreiran:** {created_at}
-⏰ **Ističe:** {expires_text}{users_text}
-        """
-
-        # Kreiranje dugmića za upravljanje
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Aktiviraj/Deaktiviraj", callback_data=f"toggle_promo_{code}"),
-                InlineKeyboardButton("🗑️ Obriši", callback_data=f"delete_promo_{code}")
-            ],
-            [
-                InlineKeyboardButton("📋 Svi korisnici", callback_data=f"promo_users_{code}"),
-                InlineKeyboardButton("⬅️ Nazad", callback_data="back_to_promo_list")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(info_text, reply_markup=reply_markup, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Error in promo_info_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def toggle_promo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Toggle aktivnost promo koda"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        code = query.data.replace("toggle_promo_", "")
-        promo_info = casino.get_promo_code_info(code)
-        
-        if not promo_info:
-            await query.edit_message_text("❌ Promo kod nije pronađen!")
-            return
-
-        # Toggle status
-        current_status = promo_info.get("active", True)
-        new_status = not current_status
-        casino.data["promo_codes"][code]["active"] = new_status
-        casino.save_data()
-
-        status_text = "aktiviran" if new_status else "deaktiviran"
-        await query.edit_message_text(
-            f"✅ Promo kod **{code}** je {status_text}!",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in toggle_promo_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def delete_promo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Briše promo kod"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        code = query.data.replace("delete_promo_", "")
-        
-        # Kreiranje potvrde
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Da, obriši", callback_data=f"confirm_delete_promo_{code}"),
-                InlineKeyboardButton("❌ Otkaži", callback_data=f"promo_info_{code}")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(
-            f"⚠️ **POTVRDA BRISANJA**\n\n"
-            f"Da li ste sigurni da želite da obrišete promo kod **{code}**?\n\n"
-            f"⚠️ Ova akcija je nepovratna!",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in delete_promo_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def confirm_delete_promo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Potvrđuje brisanje promo koda"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        code = query.data.replace("confirm_delete_promo_", "")
-        
-        success = casino.delete_promo_code(code)
-        
-        if success:
-            await query.edit_message_text(
-                f"✅ Promo kod **{code}** je uspešno obrisan!",
-                parse_mode='Markdown'
-            )
-        else:
-            await query.edit_message_text("❌ Greška pri brisanju promo koda!")
-        
-    except Exception as e:
-        logger.error(f"Error in confirm_delete_promo_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def promo_users_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Prikazuje sve korisnike koji su koristili promo kod"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        code = query.data.replace("promo_users_", "")
-        promo_info = casino.get_promo_code_info(code)
-        
-        if not promo_info:
-            await query.edit_message_text("❌ Promo kod nije pronađen!")
-            return
-
-        usage_log = promo_info["usage_log"]
-        
-        if not usage_log:
-            await query.edit_message_text(
-                f"📭 Niko još nije iskoristio promo kod **{code}**",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Formatiranje korisnika
-        users_text = f"👥 **KORISNICI PROMO KODA {code}**\n\n"
-        for i, usage in enumerate(usage_log, 1):
-            username = usage.get("username", f"User_{usage['user_id']}")
-            timestamp = datetime.fromisoformat(usage["timestamp"]).strftime("%d.%m.%Y %H:%M")
-            users_text += f"{i}. @{username} - {timestamp}\n"
-
-        # Ako je tekst predugačak, podeli ga
-        if len(users_text) > 4000:
-            users_text = users_text[:4000] + f"\n... i još {len(usage_log) - 40} korisnika"
-
-        keyboard = [
-            [InlineKeyboardButton("⬅️ Nazad", callback_data=f"promo_info_{code}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(users_text, reply_markup=reply_markup, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Error in promo_users_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def promo_total_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Prikazuje ukupne statistike promo kodova"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        promo_codes = casino.get_all_promo_codes()
-        
-        if not promo_codes:
-            await query.edit_message_text("📭 Nema kreiranih promo kodova.")
-            return
-
-        total_codes = len(promo_codes)
-        active_codes = sum(1 for p in promo_codes.values() if p.get("active", True))
-        expired_codes = 0
-        total_amount_given = 0
-        total_uses = 0
-        
-        for code, data in promo_codes.items():
-            total_uses += data["current_uses"]
-            total_amount_given += data["amount"] * data["current_uses"]
-            
-            # Proveri da li je istekao
-            if data.get("expires_at"):
-                expiry_date = datetime.fromisoformat(data["expires_at"])
-                if datetime.now() > expiry_date:
-                    expired_codes += 1
-
-        stats_text = f"""
-📊 **UKUPNE STATISTIKE PROMO KODOVA**
-
-🎫 **Kodovi:**
-• Ukupno: {total_codes}
-• Aktivni: {active_codes}
-• Istekli: {expired_codes}
-• Neaktivni: {total_codes - active_codes}
-
-💰 **Finansije:**
-• Ukupno korišćenja: {total_uses}
-• Ukupno dodeljeno: {total_amount_given:,} RSD
-• Prosečan bonus po kodu: {total_amount_given // total_codes if total_codes > 0 else 0:,} RSD
-
-🏦 **House Balance uticaj:**
-• Smanjenje zbog promo kodova: -{total_amount_given:,} RSD
-        """
-
-        keyboard = [
-            [InlineKeyboardButton("⬅️ Nazad", callback_data="back_to_promo_list")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Error in promo_total_stats_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-async def back_to_promo_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Vraća na listu promo kodova"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        promo_codes = casino.get_all_promo_codes()
-        
-        if not promo_codes:
-            await query.edit_message_text("📭 Nema kreiranih promo kodova.")
-            return
-
-        # Kreiranje dugmića za svaki promo kod
-        keyboard = []
-        for code in list(promo_codes.keys())[:20]:  # Maksimalno 20 kodova
-            promo_data = promo_codes[code]
-            status = "✅" if promo_data.get("active", True) else "❌"
-            uses_text = f"{promo_data['current_uses']}/{promo_data['max_uses']}"
-            button_text = f"{status} {code} ({uses_text})"
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"promo_info_{code}")
-            ])
-
-        # Dodaj admin opcije
-        keyboard.append([
-            InlineKeyboardButton("📊 Ukupne statistike", callback_data="promo_total_stats")
-        ])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(
-            "🎫 **PROMO KODOVI**\n\n"
-            "Kliknite na kod za detaljne informacije:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in back_to_promo_list_callback: {e}")
-        await query.edit_message_text("❌ Došlo je do greške.")
-
-# Komanda /start
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start komanda sa pozdravom i prikazom balansa"""
-    try:
-        user_id = update.effective_user.id
-        username = update.effective_user.username or "Nepoznat"
-
-        # Čuvanje username-a
-        if str(user_id) not in casino.data["users"]:
-            casino.data["users"][str(user_id)] = {}
-        casino.data["users"][str(user_id)]["username"] = username
-
-        balance = casino.get_user_balance(user_id)
-
-        welcome_text = f"""
-🎰 **Dobrodošli u Casino Bot!** 🎰
-
-Pozdrav {username}!
-💰 Vaš trenutni balans: **{balance:,} RSD**
-
-**Dostupne igre:**
-🃏 /play <ulog> - Blackjack
-🎲 /roulette <ulog> - Rulet
-🎲 /dice <ulog> <brojevi> - Dice (1-3 broja)
-🪙 /flip <ulog> <heads/tails> - Coinflip
-
-**Ostale komande:**
-💳 /bal - Proveri balans
-💼 /work - Radi za 30 RSD (svaka 3 dana)
-🎫 /promo <kod> - Iskoristi promo kod
-💸 /cashout <iznos> - Zatraži isplatu
-❓ /help - Pomoć
-        """
-
-        await update.message.reply_text(welcome_text, parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error in start_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# Komanda /bal
-async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Prikazuje balans korisnika"""
-    try:
-        user_id = update.effective_user.id
-        balance = casino.get_user_balance(user_id)
-
-        user_data = casino.data["users"][str(user_id)]
-        total_wagered = user_data.get("total_wagered", 0)
-        total_won = user_data.get("total_won", 0)
-        used_promo_codes = len(user_data.get("used_promo_codes", []))
-
-        await update.message.reply_text(
-            f"💰 **Vaš balans:** {balance:,} RSD\n\n"
-            f"📊 **Statistike:**\n"
-            f"🎲 Ukupno uloženo: {total_wagered:,} RSD\n"
-            f"🏆 Ukupno dobijeno: {total_won:,} RSD\n"
-            f"📈 Neto: {total_won - total_wagered:+,} RSD\n"
-            f"🎫 Iskorišćeni promo kodovi: {used_promo_codes}", 
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in balance_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# Komanda /work
-async def work_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Work komanda - daje 30 RSD svakih 3 dana"""
-    try:
-        user_id = update.effective_user.id
-        username = update.effective_user.username or f"User_{user_id}"
-
-        can_work, next_work_time = casino.can_work(user_id)
-
-        if not can_work:
-            # Izračunaj koliko vremena je ostalo
-            time_left = next_work_time - datetime.now()
-            days = time_left.days
-            hours, remainder = divmod(time_left.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-
-            await update.message.reply_text(
-                f"⏰ **Već ste radili!**\n\n"
-                f"Možete ponovo raditi za:\n"
-                f"📅 {days} dana, {hours} sati i {minutes} minuta\n\n"
-                f"💼 Povratak rada: {next_work_time.strftime('%d.%m.%Y %H:%M')}",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Dodeli 30 RSD
-        work_amount = 30
-        old_balance = casino.get_user_balance(user_id)
-        new_balance = casino.update_balance(user_id, work_amount)
-        casino.set_work_time(user_id)
-
-        # Oduzmi od house balance-a
-        casino.data["house_balance"] -= work_amount
-        casino.save_data()
-
-        await update.message.reply_text(
-            f"💼 **Radni dan završen!**\n\n"
-            f"👤 Radnik: {username}\n"
-            f"💰 Zaradili ste: +{work_amount} RSD\n"
-            f"💳 Novi balans: {new_balance:,} RSD\n\n"
-            f"⏰ Sledeći rad za 3 dana!",
-            parse_mode='Markdown'
-        )
-
-    except Exception as e:
-        logger.error(f"Error in work_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# BLACKJACK IGRA SA HOUSE EDGE
+# IGRE - BLACKJACK
 class BlackjackGame:
     def __init__(self, user_id: int, bet: int):
         self.user_id = user_id
@@ -952,7 +760,7 @@ class BlackjackGame:
         self.player_hand = []
         self.dealer_hand = []
         self.game_over = False
-        self.rigged = casino.is_rigged_game()  # Koristi globalni rigging sistem
+        self.rigged = casino.is_rigged_game()
 
     def create_deck(self) -> List[int]:
         """Kreira špil karata (vrednosti)"""
@@ -974,7 +782,6 @@ class BlackjackGame:
         value = sum(hand)
         aces = hand.count(1)
 
-        # Računanje asova
         while aces > 0 and value <= 11:
             value += 10  # As kao 11 umesto 1
             aces -= 1
@@ -990,15 +797,12 @@ class BlackjackGame:
 
     def start_game(self) -> str:
         """Započinje igru"""
-        # Deli početne karte
         self.player_hand = [self.deal_card(), self.deal_card()]
         self.dealer_hand = [self.deal_card(), self.deal_card()]
 
-        # Rigging logika za postizanje house edge-a
         if self.rigged:
-            # Poboljšaj dealer kartu ako je potrebno
             if self.calculate_hand_value(self.dealer_hand) < 17:
-                good_cards = [10, 9,]
+                good_cards = [10, 9, 8]
                 self.dealer_hand[1] = random.choice(good_cards)
 
         player_value = self.calculate_hand_value(self.player_hand)
@@ -1047,31 +851,26 @@ class BlackjackGame:
         return self.end_game("stand")
 
     def end_game(self, action: str) -> str:
-        """Završava igru sa house edge kalkulacijom"""
+        """Završava igru"""
         self.game_over = True
         player_value = self.calculate_hand_value(self.player_hand)
 
-        # Dealer igra
         while self.calculate_hand_value(self.dealer_hand) < 17:
             new_card = self.deal_card()
             self.dealer_hand.append(new_card)
 
         dealer_value = self.calculate_hand_value(self.dealer_hand)
 
-        # Intenzivniji rigging za postizavanje 7% house edge-a
         if self.rigged and action not in ["bust"]:
-            if dealer_value > 21 and random.random() < 0.8:  # 80% šanse da se spase dealer od bust-a
-                # Spasi dealer-a od bust-a
+            if dealer_value > 21 and random.random() < 0.8:
                 self.dealer_hand[-1] = random.choice([1, 2, 3, 4, 5, 6])
                 dealer_value = self.calculate_hand_value(self.dealer_hand)
             elif dealer_value < player_value and dealer_value < 21 and random.random() < 0.7:
-                # Poboljšaj dealer ruku
                 needed_points = min(21, player_value + 1) - dealer_value
                 if needed_points <= 10:
                     self.dealer_hand[-1] = min(10, needed_points)
                     dealer_value = self.calculate_hand_value(self.dealer_hand)
 
-        # Određivanje pobednika
         payout = 0
         result = ""
 
@@ -1099,12 +898,10 @@ class BlackjackGame:
                 result = "🟡 NERESENO!"
                 payout = 0
 
-        # Ažuriranje balansa i statistika
         new_balance = casino.update_balance(self.user_id, payout)
         casino.update_wager(self.user_id, self.bet)
         casino.update_stats("blackjack", -payout)
 
-        # Logovanje rezultata
         casino.log_game_result(
             self.user_id, 
             "Blackjack", 
@@ -1129,7 +926,6 @@ class BlackjackGame:
 # Dictionary za čuvanje aktivnih blackjack igara
 active_blackjack_games: Dict[int, BlackjackGame] = {}
 
-# Komanda /play za blackjack
 async def play_blackjack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Započinje Blackjack igru"""
     try:
@@ -1160,14 +956,12 @@ async def play_blackjack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
-        # Kreiranje nove igre
         game = BlackjackGame(user_id, bet)
         active_blackjack_games[user_id] = game
 
         game_text = game.start_game()
 
         if not game.game_over:
-            # Kreiranje dugmića
             keyboard = [
                 [
                     InlineKeyboardButton("🃏 Hit", callback_data=f"bj_hit_{user_id}"),
@@ -1185,7 +979,6 @@ async def play_blackjack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"Error in play_blackjack: {e}")
         await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
 
-# Callback handler za blackjack dugmiće
 async def blackjack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Rukuje blackjack dugmićima"""
     try:
@@ -1200,7 +993,6 @@ async def blackjack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         action = data[1]  # hit ili stand
         user_id = int(data[2])
 
-        # Provera da li je korisnik vlasnik igre
         if query.from_user.id != user_id:
             await query.edit_message_text("❌ Ova igra ne pripada vama!")
             return
@@ -1233,7 +1025,7 @@ async def blackjack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if update.callback_query:
             await update.callback_query.edit_message_text("❌ Došlo je do greške.")
 
-# ROULETTE IGRA SA HOUSE EDGE
+# ROULETTE IGRA
 async def roulette_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Rulet igra"""
     try:
@@ -1273,7 +1065,6 @@ Minimalni ulog: 10 RSD"""
             )
             return
 
-        # Kreiranje dugmića za opcije
         keyboard = [
             [
                 InlineKeyboardButton("🔴 Crveno", callback_data=f"roulette_{user_id}_{bet}_red"),
@@ -1305,7 +1096,7 @@ Minimalni ulog: 10 RSD"""
         await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
 
 async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Rukuje rulet opcijama sa house edge"""
+    """Rukuje rulet opcijama"""
     try:
         query = update.callback_query
         await query.answer()
@@ -1323,12 +1114,9 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.edit_message_text("❌ Ova opklada ne pripada vama!")
             return
 
-        # Globalni rigging sistem za house edge
         rigged = casino.is_rigged_game()
 
-        # Generisanje broja sa house edge logikom
         if rigged:
-            # Intenzivniji rigging za roulette (jer ima veći house edge prirodno)
             losing_numbers = []
 
             if choice == "red":
@@ -1336,9 +1124,9 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             elif choice == "black":
                 losing_numbers = [0] + [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
             elif choice == "even":
-                losing_numbers = [0] + list(range(1, 37, 2))  # Neparni brojevi + 0
+                losing_numbers = [0] + list(range(1, 37, 2))
             elif choice == "odd":
-                losing_numbers = [0] + list(range(2, 37, 2))  # Parni brojevi + 0
+                losing_numbers = [0] + list(range(2, 37, 2))
             elif choice == "1-18":
                 losing_numbers = [0] + list(range(19, 37))
             elif choice == "19-36":
@@ -1350,14 +1138,13 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             elif choice == "25-36":
                 losing_numbers = [0] + list(range(1, 25))
 
-            if losing_numbers and random.random() < 0.85:  # 85% šanse da se izabere losing broj
+            if losing_numbers and random.random() < 0.85:
                 number = random.choice(losing_numbers)
             else:
                 number = random.randint(0, 36)
         else:
             number = random.randint(0, 36)
 
-        # Animacija
         await query.edit_message_text("🎰 Rulet se okreće... 🎰")
         await asyncio.sleep(1)
         await query.edit_message_text("🎰 Rulet se okreće... 🌀")
@@ -1365,11 +1152,9 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("🎰 Rulet se zadržava... ⏱️")
         await asyncio.sleep(1)
 
-        # Određivanje boje
         red_numbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
         color = "🔴" if number in red_numbers else "⚫" if number != 0 else "🟢"
 
-        # Provera da li je igrač pobedio
         won = False
         payout = 0
         multiplier = 0
@@ -1409,12 +1194,10 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             payout = -bet
             result_text = "🔴 PORAZ!"
 
-        # Ažuriranje balansa i statistika
         new_balance = casino.update_balance(user_id, payout)
         casino.update_wager(user_id, bet)
         casino.update_stats("roulette", -payout)
 
-        # Logovanje rezultata
         casino.log_game_result(user_id, "Roulette", bet, f"{result_text} Broj: {number}", payout, rigged)
 
         choice_text = {
@@ -1441,619 +1224,6 @@ async def roulette_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if update.callback_query:
             await update.callback_query.edit_message_text("❌ Došlo je do greške.")
 
-# DICE IGRA SA HOUSE EDGE
-async def dice_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Dice igra sa house edge"""
-    try:
-        user_id = update.effective_user.id
-
-        if len(context.args) < 2:
-            await update.message.reply_text(
-                """❌ Molimo unesite ulog i brojeve!
-Primer: /dice 1000 1 3 6
-
-**Pravila:**
-• Možete birati 1-3 broja (od 1 do 6)
-• Isplata: 1 broj = 5.5x, 2 broja = 2.8x, 3 broja = 1.8x
-• Minimalni ulog: 10 RSD"""
-            )
-            return
-
-        try:
-            bet = int(context.args[0])
-            if bet <= 0:
-                await update.message.reply_text("❌ Ulog mora biti pozitivan broj!")
-                return
-            if bet < 10:
-                await update.message.reply_text("❌ Minimalni ulog je 10 RSD!")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Ulog mora biti broj!")
-            return
-
-        # Parsiranje brojeva
-        try:
-            chosen_numbers = [int(x) for x in context.args[1:]]
-            if len(chosen_numbers) > 3:
-                await update.message.reply_text("❌ Možete birati maksimalno 3 broja!")
-                return
-            if any(n < 1 or n > 6 for n in chosen_numbers):
-                await update.message.reply_text("❌ Brojevi moraju biti između 1 i 6!")
-                return
-            if len(set(chosen_numbers)) != len(chosen_numbers):
-                await update.message.reply_text("❌ Ne možete birati isti broj više puta!")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Brojevi moraju biti validni!")
-            return
-
-        balance = casino.get_user_balance(user_id)
-        if bet > balance:
-            await update.message.reply_text(
-                f"❌ Nemate dovoljno sredstava!\n💰 Vaš balans: {balance:,} RSD"
-            )
-            return
-
-        # Globalni rigging sistem
-        rigged = casino.is_rigged_game()
-
-        if rigged:
-            # Pokušaj da se izabere broj koji nije u chosen_numbers
-            possible_numbers = [i for i in range(1, 7) if i not in chosen_numbers]
-            if possible_numbers and random.random() < 0.9:  # 90% šanse da se izabere losing broj
-                dice_result = random.choice(possible_numbers)
-            else:
-                dice_result = random.randint(1, 6)
-        else:
-            dice_result = random.randint(1, 6)
-
-        # Animacija
-        message = await update.message.reply_text("🎲 Bacanje kockice... 🎲")
-        await asyncio.sleep(1)
-        await message.edit_text("🎲 Kockica se kotrlja... 🔄")
-        await asyncio.sleep(1)
-        await message.edit_text("🎲 Kockica se zaustavlja... ⏳")
-        await asyncio.sleep(1)
-
-        # Provera pobede
-        won = dice_result in chosen_numbers
-
-        if won:
-            # Multipliers sa house edge-om (smanjeni)
-            multipliers = {1: 5.5, 2: 2.8, 3: 1.8}
-            multiplier = multipliers[len(chosen_numbers)]
-            payout = int(bet * (multiplier - 1))
-            result_text = "🟢 POBEDA!"
-        else:
-            payout = -bet
-            result_text = "🔴 PORAZ!"
-
-        # Ažuriranje balansa i statistika
-        new_balance = casino.update_balance(user_id, payout)
-        casino.update_wager(user_id, bet)
-        casino.update_stats("dice", -payout)
-
-        # Logovanje rezultata
-        casino.log_game_result(user_id, "Dice", bet, f"{result_text} Rezultat: {dice_result}", payout, rigged)
-
-        final_text = f"""
-🎲 **DICE - REZULTAT** 🎲
-
-🎯 **Rezultat:** {dice_result}
-
-**Vaši brojevi:** {', '.join(map(str, chosen_numbers))}
-{result_text}
-
-💰 Promena balansa: {payout:+,} RSD
-💳 Novi balans: {new_balance:,} RSD
-        """
-
-        await message.edit_text(final_text, parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error in dice_game: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# COINFLIP IGRA SA HOUSE EDGE
-async def coinflip_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Coinflip igra sa house edge"""
-    try:
-        user_id = update.effective_user.id
-
-        if len(context.args) != 2:
-            await update.message.reply_text(
-                """❌ Molimo unesite ulog i izbor!
-Primer: /flip 1000 heads
-ili: /flip 1000 tails
-
-**Opcije:** heads/tails
-**Isplata:** 1.86x (umesto 2x)
-**Minimalni ulog:** 10 RSD"""
-            )
-            return
-
-        try:
-            bet = int(context.args[0])
-            if bet <= 0:
-                await update.message.reply_text("❌ Ulog mora biti pozitivan broj!")
-                return
-            if bet < 10:
-                await update.message.reply_text("❌ Minimalni ulog je 10 RSD!")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Ulog mora biti broj!")
-            return
-
-        choice = context.args[1].lower()
-        if choice not in ['heads', 'tails']:
-            await update.message.reply_text("❌ Izbor mora biti 'heads' ili 'tails'!")
-            return
-
-        balance = casino.get_user_balance(user_id)
-        if bet > balance:
-            await update.message.reply_text(
-                f"❌ Nemate dovoljno sredstava!\n💰 Vaš balans: {balance:,} RSD"
-            )
-            return
-
-        # Globalni rigging sistem
-        rigged = casino.is_rigged_game()
-
-        if rigged:
-            # 80% šanse da rezultat bude suprotan od izbora
-            if random.random() < 0.8:
-                result = 'tails' if choice == 'heads' else 'heads'
-            else:
-                result = random.choice(['heads', 'tails'])
-        else:
-            result = random.choice(['heads', 'tails'])
-
-        # Animacija
-        message = await update.message.reply_text("🪙 Bacanje novčića... 🪙")
-        await asyncio.sleep(1)
-        await message.edit_text("🪙 Novčić se okreće... 🔄")
-        await asyncio.sleep(1)
-        await message.edit_text("🪙 Novčić pada... ⬇️")
-        await asyncio.sleep(1)
-
-        # Provera pobede
-        won = choice == result
-
-        if won:
-            # Smanjen multiplier za house edge (1.86x umesto 2x)
-            payout = int(bet * 0.86)
-            result_text = "🟢 POBEDA!"
-        else:
-            payout = -bet
-            result_text = "🔴 PORAZ!"
-
-        # Ažuriranje balansa i statistika
-        new_balance = casino.update_balance(user_id, payout)
-        casino.update_wager(user_id, bet)
-        casino.update_stats("coinflip", -payout)
-
-        # Logovanje rezultata
-        casino.log_game_result(user_id, "Coinflip", bet, f"{result_text} Rezultat: {result}", payout, rigged)
-
-        result_emoji = "🟡" if result == "heads" else "⚪"
-        choice_emoji = "🟡" if choice == "heads" else "⚪"
-
-        final_text = f"""
-🪙 **COINFLIP - REZULTAT** 🪙
-
-{result_emoji} **Rezultat:** {result.upper()}
-
-{choice_emoji} **Vaš izbor:** {choice.upper()}
-{result_text}
-
-💰 Promena balansa: {payout:+,} RSD
-💳 Novi balans: {new_balance:,} RSD
-        """
-
-        await message.edit_text(final_text, parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error in coinflip_game: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# BROADCAST SISTEM
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za broadcast poruku svim korisnicima"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        if not context.args:
-            await update.message.reply_text(
-                "❌ Molimo unesite poruku za broadcast!\n"
-                "Primer: /broadcast Dobrodošli u novi Casino Bot!"
-            )
-            return
-
-        message_text = " ".join(context.args)
-        all_users = casino.get_all_users()
-
-        if not all_users:
-            await update.message.reply_text("❌ Nema korisnika za broadcast!")
-            return
-
-        # Pošaljemo poruku svim korisnicima
-        success_count = 0
-        failed_count = 0
-
-        status_message = await update.message.reply_text(
-            f"📡 **BROADCAST POKRENUO**\n\n"
-            f"👥 Ukupno korisnika: {len(all_users)}\n"
-            f"✅ Poslato: 0\n"
-            f"❌ Neuspešno: 0",
-            parse_mode='Markdown'
-        )
-
-        for i, user_id in enumerate(all_users):
-            try:
-                await context.bot.send_message(
-                    user_id,
-                    f"📢 **OBAVEŠTENJE**\n\n{message_text}",
-                    parse_mode='Markdown'
-                )
-                success_count += 1
-
-                # Ažuriraj status svakih 10 poruka
-                if (i + 1) % 10 == 0:
-                    await status_message.edit_text(
-                        f"📡 **BROADCAST U TOKU**\n\n"
-                        f"👥 Ukupno korisnika: {len(all_users)}\n"
-                        f"✅ Poslato: {success_count}\n"
-                        f"❌ Neuspešno: {failed_count}\n"
-                        f"⏳ Obrađeno: {i + 1}/{len(all_users)}",
-                        parse_mode='Markdown'
-                    )
-
-                # Kratka pauza između poruka
-                await asyncio.sleep(0.05)
-
-            except Exception as e:
-                failed_count += 1
-                logger.error(f"Failed to send broadcast to {user_id}: {e}")
-
-        # Finalni status
-        await status_message.edit_text(
-            f"📡 **BROADCAST ZAVRŠEN**\n\n"
-            f"👥 Ukupno korisnika: {len(all_users)}\n"
-            f"✅ Uspešno poslato: {success_count}\n"
-            f"❌ Neuspešno: {failed_count}\n\n"
-            f"📝 Poruka: {message_text[:100]}{'...' if len(message_text) > 100 else ''}",
-            parse_mode='Markdown'
-        )
-
-        # Sačuvaj broadcast u istoriju
-        casino.data["broadcast_history"].append({
-            "timestamp": datetime.now().isoformat(),
-            "message": message_text,
-            "total_users": len(all_users),
-            "success_count": success_count,
-            "failed_count": failed_count
-        })
-
-        # Čuvaj samo poslednih 50 broadcast-ova
-        if len(casino.data["broadcast_history"]) > 50:
-            casino.data["broadcast_history"] = casino.data["broadcast_history"][-50:]
-
-        casino.save_data()
-
-    except Exception as e:
-        logger.error(f"Error in broadcast_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške tokom broadcast-a.")
-
-# ADMIN KOMANDE
-async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za dodavanje balansa"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        if len(context.args) != 2:
-            await update.message.reply_text("❌ Korišćenje: /add <user_id> <iznos>")
-            return
-
-        try:
-            target_user_id = int(context.args[0])
-            amount = int(context.args[1])
-        except ValueError:
-            await update.message.reply_text("❌ User ID i iznos moraju biti brojevi!")
-            return
-
-        # Dodaj balans korisniku
-        old_balance = casino.get_user_balance(target_user_id)
-        new_balance = casino.update_balance(target_user_id, amount)
-
-        # Ažuriraj house balance
-        casino.data["house_balance"] -= amount
-        casino.save_data()
-
-        await update.message.reply_text(
-            f"✅ **Balans je ažuriran!**\n\n"
-            f"👤 Korisnik: {target_user_id}\n"
-            f"💰 Stari balans: {old_balance:,} RSD\n"
-            f"➕ Dodano: {amount:+,} RSD\n"
-            f"💳 Novi balans: {new_balance:,} RSD",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in add_balance_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-async def remove_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za oduzimanje balansa"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        if len(context.args) != 2:
-            await update.message.reply_text("❌ Korišćenje: /remove <user_id> <iznos>")
-            return
-
-        try:
-            target_user_id = int(context.args[0])
-            amount = int(context.args[1])
-        except ValueError:
-            await update.message.reply_text("❌ User ID i iznos moraju biti brojevi!")
-            return
-
-        # Oduzmi balans korisniku
-        old_balance = casino.get_user_balance(target_user_id)
-        new_balance = casino.update_balance(target_user_id, -amount)
-
-        # Ažuriraj house balance
-        casino.data["house_balance"] += amount
-        casino.save_data()
-
-        await update.message.reply_text(
-            f"✅ **Balans je ažuriran!**\n\n"
-            f"👤 Korisnik: {target_user_id}\n"
-            f"💰 Stari balans: {old_balance:,} RSD\n"
-            f"➖ Oduzeto: {amount:,} RSD\n"
-            f"💳 Novi balans: {new_balance:,} RSD",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in remove_balance_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-async def house_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za prikaz house balansa i statistika"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        house_balance = casino.data.get("house_balance", 0)
-        total_users = len(casino.data.get("users", {}))
-        total_user_balance = sum(user.get("balance", 0) for user in casino.data.get("users", {}).values())
-
-        # Statistike igara
-        stats = casino.data.get("stats", {})
-        total_games = sum(game_stat.get("games", 0) for game_stat in stats.values())
-        total_house_profit = sum(game_stat.get("profit", 0) for game_stat in stats.values())
-
-        # Statistike promo kodova
-        promo_codes = casino.data.get("promo_codes", {})
-        total_promo_given = sum(code_data["amount"] * code_data["current_uses"] 
-                               for code_data in promo_codes.values())
-        active_promo_codes = sum(1 for p in promo_codes.values() if p.get("active", True))
-
-        # Statistike rigging-a iz poslednje igre
-        recent_games = casino.data.get("game_history", [])[-50:]
-        rigged_count = sum(1 for game in recent_games if game.get("rigged", False))
-
-        # House edge izračun
-        total_wagered = sum(user.get("total_wagered", 0) for user in casino.data.get("users", {}).values())
-        actual_house_edge = (total_house_profit / total_wagered * 100) if total_wagered > 0 else 0
-
-        stats_text = "\n".join([
-            f"🎲 {game.title()}: {data.get('games', 0)} igara, {data.get('profit', 0):+,} RSD"
-            for game, data in stats.items()
-        ])
-
-        await update.message.reply_text(
-            f"🏦 **HOUSE STATUS**\n\n"
-            f"💰 House Balance: {house_balance:,} RSD\n"
-            f"👥 Ukupno korisnika: {total_users}\n"
-            f"💳 Balans korisnika: {total_user_balance:,} RSD\n\n"
-            f"📊 **Statistike igara:**\n"
-            f"{stats_text}\n\n"
-            f"🎫 **Promo kodovi:**\n"
-            f"📦 Ukupno: {len(promo_codes)}\n"
-            f"✅ Aktivni: {active_promo_codes}\n"
-            f"💸 Ukupno dodeljeno: {total_promo_given:,} RSD\n\n"
-            f"🎯 **House Edge:**\n"
-            f"📈 Cilj: 10.00%\n"
-            f"📊 Stvarni: {actual_house_edge:.2f}%\n"
-            f"💸 Ukupan profit: {total_house_profit:,} RSD\n\n"
-            f"🎰 **Rigging statistike:**\n"
-            f"⚙️ Poslednje 50 igara: {rigged_count}/50 rigged\n"
-            f"📋 Ukupno igara: {total_games}",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in house_balance_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# CASHOUT SISTEM
-async def cashout_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Komanda za zahtev za cashout"""
-    try:
-        user_id = update.effective_user.id
-        username = update.effective_user.username or f"User_{user_id}"
-
-        if not context.args:
-            await update.message.reply_text(
-                "❌ Molimo unesite iznos!\n"
-                "Primer: /cashout 5000\n"
-                "Minimalni cashout: 1,000 RSD"
-            )
-            return
-
-        try:
-            amount = int(context.args[0])
-            if amount <= 0:
-                await update.message.reply_text("❌ Iznos mora biti pozitivan broj!")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Iznos mora biti broj!")
-            return
-
-        balance = casino.get_user_balance(user_id)
-        if amount > balance:
-            await update.message.reply_text(
-                f"❌ Nemate dovoljno sredstava!\n💰 Vaš balans: {balance:,} RSD"
-            )
-            return
-
-        if amount < 1000:
-            await update.message.reply_text("❌ Minimalni cashout je 1.000 RSD!")
-            return
-
-        # Ensure cashout_requests exists
-        casino._ensure_data_structure(casino.data)
-
-        # Kreiranje zahteva za cashout
-        request_id = f"cashout_{user_id}_{int(datetime.now().timestamp())}"
-        casino.data["cashout_requests"][request_id] = {
-            "user_id": user_id,
-            "username": username,
-            "amount": amount,
-            "timestamp": datetime.now().isoformat(),
-            "status": "pending"
-        }
-
-        # Rezerviši sredstva (oduzmi iz balansa)
-        casino.update_balance(user_id, -amount)
-
-        casino.save_data()
-
-        # Obavesti admina
-        try:
-            await context.bot.send_message(
-                ADMIN_ID,
-                f"💸 **NOVI CASHOUT ZAHTEV**\n\n"
-                f"👤 Korisnik: @{username} (ID: {user_id})\n"
-                f"💰 Iznos: {amount:,} RSD\n"
-                f"🆔 Request ID: {request_id}\n\n"
-                f"Koristite /cashouts za upravljanje zahtevima.",
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify admin about cashout: {e}")
-
-        await update.message.reply_text(
-            f"✅ **Cashout zahtev je poslat!**\n\n"
-            f"💰 Iznos: {amount:,} RSD\n"
-            f"🆔 Request ID: {request_id}\n\n"
-            f"Sredstva su rezervisana i biće isplaćena nakon odobravanja.\n"
-            f"Dobićete kod za preuzimanje kada admin odobri zahtev.",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in cashout_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-async def cashouts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin komanda za upravljanje cashout zahtevima"""
-    try:
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Nemate dozvolu za ovu komandu!")
-            return
-
-        # Ensure cashout_requests exists
-        casino._ensure_data_structure(casino.data)
-
-        pending_requests = {k: v for k, v in casino.data["cashout_requests"].items() 
-                           if v.get("status") == "pending"}
-
-        if not pending_requests:
-            await update.message.reply_text("📭 Nema pending cashout zahteva.")
-            return
-
-        # Kreiranje dugmića za svaki zahtev
-        keyboard = []
-        for request_id, request_data in list(pending_requests.items())[:10]:  # Maksimalno 10 zahteva
-            username = request_data.get("username", "Unknown")
-            amount = request_data.get("amount", 0)
-            button_text = f"✅ {username}: {amount:,} RSD"
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"approve_cashout_{request_id}")
-            ])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            "💸 **PENDING CASHOUT ZAHTEVI**\n\nKliknite na zahtev da ga odobrite:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Error in cashouts_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-async def approve_cashout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Odobrava cashout zahtev"""
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Nemate dozvolu!")
-            return
-
-        request_id = query.data.replace("approve_cashout_", "")
-
-        if request_id not in casino.data.get("cashout_requests", {}):
-            await query.edit_message_text("❌ Zahtev nije pronađen!")
-            return
-
-        request_data = casino.data["cashout_requests"][request_id]
-        if request_data.get("status") != "pending":
-            await query.edit_message_text("❌ Zahtev je već obrađen!")
-            return
-
-        # Generiši kod
-        cashout_code = f"CASH{random.randint(10000, 99999)}"
-
-        # Ažuriraj zahtev
-        casino.data["cashout_requests"][request_id]["status"] = "approved"
-        casino.data["cashout_requests"][request_id]["code"] = cashout_code
-        casino.data["cashout_requests"][request_id]["approved_at"] = datetime.now().isoformat()
-
-        casino.save_data()
-
-        # Pošalji kod korisniku
-        try:
-            await context.bot.send_message(
-                request_data["user_id"],
-                f"✅ **CASHOUT ODOBREN!**\n\n"
-                f"💰 Iznos: {request_data['amount']:,} RSD\n"
-                f"🔐 Kod: **{cashout_code}**\n\n"
-                f"Kontaktirajte support sa ovim kodom za preuzimanje sredstava.",
-                parse_mode='Markdown'
-            )
-
-            await query.edit_message_text(
-                f"✅ **Cashout odobren!**\n\n"
-                f"👤 Korisnik: {request_data.get('username', 'Unknown')}\n"
-                f"💰 Iznos: {request_data.get('amount', 0):,} RSD\n"
-                f"🔐 Kod poslat korisniku: {cashout_code}",
-                parse_mode='Markdown'
-            )
-
-        except Exception as e:
-            await query.edit_message_text(f"❌ Greška pri slanju koda: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error in approve_cashout_callback: {e}")
-        if update.callback_query:
-            await update.callback_query.edit_message_text("❌ Došlo je do greške.")
-
 # GLAVNI CALLBACK HANDLER
 async def main_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Glavni callback handler za sve dugmiće"""
@@ -2067,87 +1237,12 @@ async def main_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await blackjack_callback(update, context)
         elif query.data.startswith("roulette_"):
             await roulette_callback(update, context)
-        elif query.data.startswith("approve_cashout_"):
-            await approve_cashout_callback(update, context)
-        elif query.data.startswith("promo_info_"):
-            await promo_info_callback(update, context)
-        elif query.data.startswith("toggle_promo_"):
-            await toggle_promo_callback(update, context)
-        elif query.data.startswith("delete_promo_"):
-            await delete_promo_callback(update, context)
-        elif query.data.startswith("confirm_delete_promo_"):
-            await confirm_delete_promo_callback(update, context)
-        elif query.data.startswith("promo_users_"):
-            await promo_users_callback(update, context)
-        elif query.data == "promo_total_stats":
-            await promo_total_stats_callback(update, context)
-        elif query.data == "back_to_promo_list":
-            await back_to_promo_list_callback(update, context)
         else:
             await query.answer("❌ Nepoznata komanda!")
     except Exception as e:
         logger.error(f"Error in main_callback_handler: {e}")
         if update.callback_query:
             await update.callback_query.answer("❌ Došlo je do greške.")
-
-# HELP KOMANDA
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Help komanda sa svim dostupnim komandama"""
-    try:
-        user_id = update.effective_user.id
-
-        help_text = f"""
-🎰 **CASINO BOT - KOMANDE** 🎰
-
-**🎮 Igre (House Edge: 10%):**
-🃏 /play <ulog> - Blackjack
-🎰 /roulette <ulog> - Rulet (zatim izaberi opciju)
-🎲 /dice <ulog> <brojevi> - Dice (1-3 broja od 1-6)
-🪙 /flip <ulog> <heads/tails> - Coinflip
-
-**💰 Balans:**
-💳 /bal - Proveri balans i statistike
-💼 /work - Radi za 30 RSD (svaka 3 dana)
-🎫 /promo <kod> - Iskoristi promo kod
-💸 /cashout <iznos> - Zatraži isplatu (min. 1,000 RSD)
-
-**ℹ️ Ostalo:**
-🏠 /start - Početna poruka
-❓ /help - Ova poruka
-
-**📏 Minimalni ulog:** 10 RSD na sve igre
-        """
-
-        # Admin komande (samo za admina)
-        if user_id == ADMIN_ID:
-            help_text += """
-
-**🔧 Admin komande:**
-➕ /add <user_id> <iznos> - Dodaj balans
-➖ /remove <user_id> <iznos> - Oduzmi balans  
-🏦 /house - House balans i detaljne statistike
-💸 /cashouts - Upravljanje cashout zahtevima
-📡 /broadcast <poruka> - Pošalji poruku svim korisnicima
-
-**🎫 Promo kod komande:**
-🎁 /create_promo <kod> <iznos> <max_korišćenja> [dani] - Kreiraj promo kod
-📊 /promo_stats - Upravljanje promo kodovima
-            """
-
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error in help_command: {e}")
-        await update.message.reply_text("❌ Došlo je do greške. Molimo pokušajte ponovo.")
-
-# BROADCAST MESSAGE HANDLER (za odgovor na broadcast)
-async def handle_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Rukuje porukama koje nisu komande (za broadcast odgovor)"""
-    try:
-        # Ova funkcija se pozove samo ako poruka nije komanda
-        # Možemo je koristiti za logovanje ili druge funkcionalnosti
-        pass
-    except Exception as e:
-        logger.error(f"Error in handle_broadcast_message: {e}")
 
 # ERROR HANDLER
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2165,7 +1260,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 def main():
     """Glavna funkcija za pokretanje bota"""
     try:
-        # Kreiranje aplikacije
         application = Application.builder().token(BOT_TOKEN).build()
 
         # Registracija komandi
@@ -2177,46 +1271,26 @@ def main():
         # Igre
         application.add_handler(CommandHandler("play", play_blackjack))
         application.add_handler(CommandHandler("roulette", roulette_game))
-        application.add_handler(CommandHandler("dice", dice_game))
-        application.add_handler(CommandHandler("flip", coinflip_game))
 
         # Promo kod sistem
         application.add_handler(CommandHandler("promo", promo_command))
         application.add_handler(CommandHandler("create_promo", create_promo_command))
-        application.add_handler(CommandHandler("promo_stats", promo_stats_command))
 
         # Admin komande
         application.add_handler(CommandHandler("add", add_balance_command))
-        application.add_handler(CommandHandler("remove", remove_balance_command))
         application.add_handler(CommandHandler("house", house_balance_command))
-        application.add_handler(CommandHandler("broadcast", broadcast_command))
-
-        # Cashout sistem
-        application.add_handler(CommandHandler("cashout", cashout_command))
-        application.add_handler(CommandHandler("cashouts", cashouts_command))
 
         # Callback handlers
         application.add_handler(CallbackQueryHandler(main_callback_handler))
 
-        # Message handler za sve ostale poruke (ne-komande)
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_message))
-
         # Error handler
         application.add_error_handler(error_handler)
 
-        # Pokretanje bota
-        print("🎰 Casino bot je pokrenuo sa promo kod sistemom!")
+        print("🎰 Casino bot je pokrenuo!")
         print(f"📁 Podaci se čuvaju u: {DATA_FILE}")
         print(f"🔧 Admin ID: {ADMIN_ID}")
         print(f"📊 House Edge: {HOUSE_EDGE*100}%")
         print(f"⚙️ Rigging Probability: {RIGGING_PROBABILITY*100}%")
-        print("💼 Work funkcija: 30 RSD svakih 3 dana")
-        print("📡 Broadcast sistem je aktivan")
-        print("🎫 Promo kod sistem je aktivan")
-        print("\n🎁 PROMO KOD FUNKCIJE:")
-        print("• /create_promo <kod> <iznos> <max_korišćenja> [dani] - Kreiranje promo koda")
-        print("• /promo <kod> - Korišćenje promo koda")
-        print("• /promo_stats - Admin upravljanje promo kodovima")
 
         application.run_polling(drop_pending_updates=True)
     except Exception as e:
